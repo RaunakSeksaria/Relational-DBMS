@@ -49,7 +49,8 @@ db-load: db-up
 	@$(MYSQL) -e "CREATE DATABASE IF NOT EXISTS $(DB)"
 	@$(MYSQL) $(DB) < sql/schema.sql
 	@$(MYSQL) $(DB) < sql/seed.sql
-	@echo "loaded schema + seed into $(DB)"
+	@$(MYSQL) $(DB) < sql/views.sql
+	@echo "loaded schema + seed + views into $(DB)"
 
 db-reset: db-load
 

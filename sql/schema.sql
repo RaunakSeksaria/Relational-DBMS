@@ -9,6 +9,11 @@
 
 SET NAMES utf8mb4;
 
+-- Views depend on these tables, so they go first; sql/views.sql recreates them.
+DROP VIEW IF EXISTS v_surveillance_targets;
+DROP VIEW IF EXISTS v_member_hierarchy;
+DROP VIEW IF EXISTS v_faction_membership;
+
 -- Drops run in reverse dependency order so reloading is idempotent.
 DROP TABLE IF EXISTS Surveys;
 DROP TABLE IF EXISTS Organizations;

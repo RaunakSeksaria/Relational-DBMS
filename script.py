@@ -111,60 +111,27 @@ class IlluminatiDB:
             cursor.execute(meetings_query, (year, month))
             meetings = cursor.fetchall()
 
-            # The hierarchy is scoped to the factions that actually met in the
-            # requested month. Without ActiveFactions this returns every member
-            # of every faction, so the "monthly" report shows an identical
-            # hierarchy for a month with no meetings at all.
+            # v_member_hierarchy (sql/views.sql) holds the recursive descent.
+            # Scoping it to the factions that actually met keeps the report
+            # monthly: unscoped, it returns every member of every faction, so a
+            # month with no meetings still prints a full hierarchy.
             hierarchy_query = """
-            WITH RECURSIVE ActiveFactions AS (
+            SELECT
+                Member_Id,
+                Fname,
+                Lname,
+                Faction_Id,
+                Leader_Id,
+                Level,
+                Faction_Name,
+                Subordinates
+            FROM v_member_hierarchy
+            WHERE Faction_Id IN (
                 SELECT DISTINCT Faction_Id
                 FROM Faction_Meetings
                 WHERE YEAR(Date) = %s AND MONTH(Date) = %s
-            ),
-            MemberHierarchy AS (
-                -- Base case: top-level leaders (no Leader_Id)
-                SELECT
-                    Member_Id,
-                    Fname,
-                    Lname,
-                    Faction_Id,
-                    Leader_Id,
-                    0 as Level
-                FROM Faction_Members
-                WHERE Leader_Id IS NULL
-                  AND Faction_Id IN (SELECT Faction_Id FROM ActiveFactions)
-
-                UNION ALL
-
-                -- Recursive case: members with leaders, kept inside the same
-                -- active faction so a cross-faction leader cannot drag in
-                -- members of a faction that did not meet.
-                SELECT
-                    fm.Member_Id,
-                    fm.Fname,
-                    fm.Lname,
-                    fm.Faction_Id,
-                    fm.Leader_Id,
-                    mh.Level + 1
-                FROM Faction_Members fm
-                JOIN MemberHierarchy mh
-                  ON fm.Leader_Id = mh.Member_Id
-                 AND fm.Faction_Id = mh.Faction_Id
             )
-            SELECT 
-                mh.Member_Id,
-                mh.Fname,
-                mh.Lname,
-                mh.Faction_Id,
-                mh.Leader_Id,
-                mh.Level,
-                f.Aim as Faction_Name,
-                (SELECT COUNT(*)
-                FROM Faction_Members sub
-                WHERE sub.Leader_Id = mh.Member_Id) as Subordinates
-            FROM MemberHierarchy mh
-            JOIN Factions f ON mh.Faction_Id = f.Faction_Id
-            ORDER BY mh.Faction_Id, mh.Level, mh.Member_Id
+            ORDER BY Faction_Id, Level, Member_Id
             """
             cursor.execute(hierarchy_query, (year, month))
             hierarchy = cursor.fetchall()
@@ -209,6 +176,58 @@ class IlluminatiDB:
                 "organizations": org_stats,
                 "summary": summary
             }
+
+    def get_faction_leaderboard(self) -> List[Dict]:
+        """Rank every faction by membership.
+
+        RANK and DENSE_RANK are both returned to show how they treat ties:
+        factions tied on member count share a rank, after which RANK skips
+        ahead and DENSE_RANK does not.
+
+        SUM(COUNT(*)) OVER () is the notable part -- the window is evaluated
+        after GROUP BY, so it totals the grouped rows and each faction's share
+        falls out without a second query or a self-join.
+        """
+        with self.connection.cursor() as cursor:
+            query = """
+            SELECT
+                f.Faction_Id,
+                f.Aim,
+                COUNT(fm.Member_Id) as Member_Count,
+                RANK()       OVER (ORDER BY COUNT(fm.Member_Id) DESC) as Rank_With_Gaps,
+                DENSE_RANK() OVER (ORDER BY COUNT(fm.Member_Id) DESC) as Rank_No_Gaps,
+                ROUND(100.0 * COUNT(fm.Member_Id)
+                      / NULLIF(SUM(COUNT(fm.Member_Id)) OVER (), 0), 1) as Pct_Of_All_Members
+            FROM Factions f
+            LEFT JOIN Faction_Members fm ON f.Faction_Id = fm.Faction_Id
+            GROUP BY f.Faction_Id, f.Aim
+            ORDER BY Member_Count DESC, f.Faction_Id
+            """
+            cursor.execute(query)
+            return cursor.fetchall()
+
+    def get_timeline_cadence(self) -> List[Dict]:
+        """Measure the interval between consecutive timeline events.
+
+        LAG and LEAD reach across rows without a self-join. The earliest event
+        has no predecessor, so its gap is NULL rather than 0 -- reporting 0
+        would claim two events happened on the same day.
+        """
+        with self.connection.cursor() as cursor:
+            query = """
+            SELECT
+                Event_Id,
+                Date,
+                Status,
+                Description,
+                LAG(Date)  OVER (ORDER BY Date) as Prev_Event_Date,
+                DATEDIFF(Date, LAG(Date) OVER (ORDER BY Date)) as Days_Since_Prev,
+                LEAD(Date) OVER (ORDER BY Date) as Next_Event_Date
+            FROM Sacred_Timeline_Events
+            ORDER BY Date
+            """
+            cursor.execute(query)
+            return cursor.fetchall()
 
     def add_faction_member(self, member_data: Dict) -> bool:
         try:
@@ -371,6 +390,9 @@ def print_menu():
     print("10. Update Key Illuminati Member name")
     print("11. Change Faction Head Title")
 
+    print("\nAnalytics:")
+    print("12. Faction leaderboard (ranked by membership)")
+    print("13. Sacred Timeline event cadence")
 
     print("\n0. Exit")
     print("\n============================================")
@@ -391,7 +413,7 @@ def main():
             while True:
                 os.system('cls' if os.name == 'nt' else 'clear')
                 print_menu()
-                choice = input("\nEnter your choice (0-9): ")
+                choice = input("\nEnter your choice (0-13): ")
 
                 try:
                     if choice == '0':
@@ -537,6 +559,30 @@ def main():
                         new_head_title = input("Enter new Head Title: ")
                         if db.update_faction_head(faction_id, new_head_title):
                             print("Faction head updated successfully!")
+
+                    elif choice == '12':
+                        leaderboard = db.get_faction_leaderboard()
+                        print("\n=== Faction Leaderboard ===")
+                        print(f"\n{'Rank':>4}  {'Dense':>5}  {'Members':>7}  {'Share':>6}  Faction")
+                        print("-" * 60)
+                        for row in leaderboard:
+                            print(f"{row['Rank_With_Gaps']:>4}  "
+                                  f"{row['Rank_No_Gaps']:>5}  "
+                                  f"{row['Member_Count']:>7}  "
+                                  f"{row['Pct_Of_All_Members']:>5}%  "
+                                  f"{row['Aim']}")
+                        print("\nRank skips after a tie; Dense does not.")
+
+                    elif choice == '13':
+                        cadence = db.get_timeline_cadence()
+                        print("\n=== Sacred Timeline Event Cadence ===")
+                        for row in cadence:
+                            gap = row['Days_Since_Prev']
+                            gap_text = "first event on record" if gap is None \
+                                else f"{gap} days after the previous event"
+                            print(f"\n{row['Date']}  [{row['Status']}]  {row['Event_Id']}")
+                            print(f"  {row['Description']}")
+                            print(f"  {gap_text}")
 
                     else:
                         print("\nInvalid choice. Please try again.")
