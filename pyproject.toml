@@ -1,0 +1,17 @@
+[project]
+name = "illuminati-dbms"
+version = "0.1.0"
+description = "Terminal client for the Illuminati relational database, with hand-written SQL over MySQL 8."
+requires-python = ">=3.9"
+dependencies = [
+    "pymysql>=1.1",
+    # Not imported anywhere, but required at runtime: MySQL 8.4 defaults to the
+    # caching_sha2_password auth plugin, and PyMySQL needs cryptography to
+    # complete that handshake over a non-TLS connection.
+    "cryptography>=42",
+]
+
+# A single script rather than an installable package, so uv builds the
+# environment without trying to install the project itself.
+[tool.uv]
+package = false

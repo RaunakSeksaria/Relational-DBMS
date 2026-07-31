@@ -1,16 +1,15 @@
 import pymysql
-from datetime import datetime
 import os
-from dateutil import parser
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 class IlluminatiDB:
     def __init__(self):
         self.connection = pymysql.connect(
-            host='localhost',
-            user='root',
-            password='mysql',
-            database='Illuminati',
+            host=os.getenv('ILLUMINATI_DB_HOST', 'localhost'),
+            port=int(os.getenv('ILLUMINATI_DB_PORT', '3306')),
+            user=os.getenv('ILLUMINATI_DB_USER', 'root'),
+            password=os.getenv('ILLUMINATI_DB_PASSWORD', 'mysql'),
+            database=os.getenv('ILLUMINATI_DB_NAME', 'Illuminati'),
             cursorclass=pymysql.cursors.DictCursor
         )
 
@@ -53,12 +52,17 @@ class IlluminatiDB:
 
     def get_total_members(self) -> Dict[str, int]:
         with self.connection.cursor() as cursor:
+            # Faction totals must come from Factions, not from Faction_Members:
+            # counting distinct Faction_Id there silently skips every faction
+            # that has no members yet, inflating the average.
             query = """
             SELECT
-                COUNT(DISTINCT Member_Id) as total_members,
-                COUNT(DISTINCT Faction_Id) as total_factions,
-                ROUND(COUNT(DISTINCT Member_Id) / COUNT(DISTINCT Faction_Id), 2) as avg_members_per_faction
-            FROM Faction_Members
+                (SELECT COUNT(*) FROM Faction_Members) as total_members,
+                (SELECT COUNT(*) FROM Factions) as total_factions,
+                ROUND(
+                    (SELECT COUNT(*) FROM Faction_Members)
+                    / NULLIF((SELECT COUNT(*) FROM Factions), 0)
+                , 2) as avg_members_per_faction
             """
             cursor.execute(query)
             return cursor.fetchone()
@@ -107,10 +111,19 @@ class IlluminatiDB:
             cursor.execute(meetings_query, (year, month))
             meetings = cursor.fetchall()
 
+            # The hierarchy is scoped to the factions that actually met in the
+            # requested month. Without ActiveFactions this returns every member
+            # of every faction, so the "monthly" report shows an identical
+            # hierarchy for a month with no meetings at all.
             hierarchy_query = """
-            WITH RECURSIVE MemberHierarchy AS (
+            WITH RECURSIVE ActiveFactions AS (
+                SELECT DISTINCT Faction_Id
+                FROM Faction_Meetings
+                WHERE YEAR(Date) = %s AND MONTH(Date) = %s
+            ),
+            MemberHierarchy AS (
                 -- Base case: top-level leaders (no Leader_Id)
-                SELECT 
+                SELECT
                     Member_Id,
                     Fname,
                     Lname,
@@ -119,11 +132,14 @@ class IlluminatiDB:
                     0 as Level
                 FROM Faction_Members
                 WHERE Leader_Id IS NULL
-                
+                  AND Faction_Id IN (SELECT Faction_Id FROM ActiveFactions)
+
                 UNION ALL
-                
-                -- Recursive case: members with leaders
-                SELECT 
+
+                -- Recursive case: members with leaders, kept inside the same
+                -- active faction so a cross-faction leader cannot drag in
+                -- members of a faction that did not meet.
+                SELECT
                     fm.Member_Id,
                     fm.Fname,
                     fm.Lname,
@@ -131,7 +147,9 @@ class IlluminatiDB:
                     fm.Leader_Id,
                     mh.Level + 1
                 FROM Faction_Members fm
-                JOIN MemberHierarchy mh ON fm.Leader_Id = mh.Member_Id
+                JOIN MemberHierarchy mh
+                  ON fm.Leader_Id = mh.Member_Id
+                 AND fm.Faction_Id = mh.Faction_Id
             )
             SELECT 
                 mh.Member_Id,
@@ -148,7 +166,7 @@ class IlluminatiDB:
             JOIN Factions f ON mh.Faction_Id = f.Faction_Id
             ORDER BY mh.Faction_Id, mh.Level, mh.Member_Id
             """
-            cursor.execute(hierarchy_query)
+            cursor.execute(hierarchy_query, (year, month))
             hierarchy = cursor.fetchall()
 
             return {
@@ -278,9 +296,9 @@ class IlluminatiDB:
                 if not artifact:
                     raise ValueError("Artifact not found")
 
-                cursor.execute("DELETE FROM Powers WHERE Artifact_Id = %s", (artifact_id,))
-                cursor.execute("DELETE FROM Guards WHERE Artifact_Id = %s", (artifact_id,))
-                cursor.execute("DELETE FROM Perform_Rituals WHERE Artifact_Id = %s", (artifact_id,))
+                # Powers, Guards and Perform_Rituals all declare ON DELETE
+                # CASCADE against Artifacts_And_Treasures, so the database
+                # removes them. See sql/schema.sql.
                 cursor.execute("DELETE FROM Artifacts_And_Treasures WHERE Artifact_Id = %s", (artifact_id,))
 
                 self.connection.commit()
