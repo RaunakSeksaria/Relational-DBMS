@@ -2,6 +2,7 @@
 
 Welcome to the Illuminati Database Management System (IDMS). This project is designed to manage and organize data related to Illuminati ,a secret organisation that controls the whole world, including factions, members, events, artifacts, and surveillance activities. With a focus on efficiency and security, IDMS helps streamline complex data management tasks while maintaining organizational integrity.
 
+Built for **CS4.301 – Data and Applications**, Project Phase 4, by Team 53.
 
 ## Available Operations
 
@@ -52,19 +53,16 @@ Welcome to the Illuminati Database Management System (IDMS). This project is des
 11. **Change Faction Head Title**
     - Update the leadership structure of factions
     - Ensures proper authority chain maintenance
-   
-    
+
+## Team 53
+
+- Raunak Seksaria (2023113019)
+- Vishesh Saraswat (2023111001)
+- Harshit Lalwani (2023111028)
+- Gracy Garg (2023101118)
 
 # Acknowledgments
 
 The Illuminati for their eternal guidance.
 
 The developers who contributed to this mystical project.
-
-- Raunak Seksaria 
-- Vishesh Saraswat
-- Harshit Lalwani 
-- Gracy Garg 
-
-Video link is [here](https://iiitaphyd-my.sharepoint.com/:v:/g/personal/vishesh_saraswat_research_iiit_ac_in/ESZEqQvJFjtPiWQ9gREgsXgBbb5h1M4J3MxyLuR_GzkBzQ?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=Chrg8e)
-
