@@ -104,11 +104,19 @@ class IlluminatiDB:
             JOIN Factions f ON fm.Faction_Id = f.Faction_Id
             LEFT JOIN Faction_Members fmem ON f.Faction_Id = fmem.Faction_Id
             LEFT JOIN Key_Illuminati_Members kim ON f.HeadTitle = kim.Title
-            WHERE YEAR(fm.Date) = %s AND MONTH(fm.Date) = %s
+            -- Half-open date range rather than filtering on YEAR(Date) and
+            -- MONTH(Date). Wrapping the column in a function makes the
+            -- predicate non-sargable: the index can only be scanned end to
+            -- end, never range-scanned. A bare column keeps it usable.
+            -- (Placeholders must not appear in comments either: PyMySQL
+            --  counts every placeholder token in the string, comments
+            --  included, and raises on the parameter-count mismatch.)
+            WHERE fm.Date >= MAKEDATE(%s, 1) + INTERVAL (%s - 1) MONTH
+              AND fm.Date <  MAKEDATE(%s, 1) + INTERVAL %s MONTH
             GROUP BY f.Faction_Id, f.Aim, fm.Date, fm.Time, fm.Agenda, fm.City, fm.Country, kim.Name
             ORDER BY fm.Date, fm.Time
             """
-            cursor.execute(meetings_query, (year, month))
+            cursor.execute(meetings_query, (year, month, year, month))
             meetings = cursor.fetchall()
 
             # v_member_hierarchy (sql/views.sql) holds the recursive descent.
@@ -129,11 +137,12 @@ class IlluminatiDB:
             WHERE Faction_Id IN (
                 SELECT DISTINCT Faction_Id
                 FROM Faction_Meetings
-                WHERE YEAR(Date) = %s AND MONTH(Date) = %s
+                WHERE Date >= MAKEDATE(%s, 1) + INTERVAL (%s - 1) MONTH
+                  AND Date <  MAKEDATE(%s, 1) + INTERVAL %s MONTH
             )
             ORDER BY Faction_Id, Level, Member_Id
             """
-            cursor.execute(hierarchy_query, (year, month))
+            cursor.execute(hierarchy_query, (year, month, year, month))
             hierarchy = cursor.fetchall()
 
             return {

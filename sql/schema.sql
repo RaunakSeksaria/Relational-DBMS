@@ -107,6 +107,10 @@ CREATE TABLE Faction_Meetings (
   City       varchar(255) NOT NULL,
   Country    varchar(255) NOT NULL,
   PRIMARY KEY (Faction_Id, Time, Date),
+  -- Date is the third column of the primary key, so the PK cannot serve a
+  -- date-range lookup. The monthly report filters on date alone; see
+  -- docs/performance.md for the measured effect.
+  KEY idx_meetings_date (Date),
   CONSTRAINT fk_faction_meetings_faction FOREIGN KEY (Faction_Id)
     REFERENCES Factions (Faction_Id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
