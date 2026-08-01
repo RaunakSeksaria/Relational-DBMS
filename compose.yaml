@@ -1,0 +1,39 @@
+# Starts the MySQL instance the application expects.
+#
+#   docker compose up -d      (or: podman compose up -d)
+#
+# The Makefile drives podman directly and does not use this file -- it is here
+# so the database can be started with one familiar command, with no Makefile
+# and no podman required. Credentials match the defaults in script.py.
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: illuminati-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: Illuminati
+    ports:
+      - "3306:3306"
+    volumes:
+      # Named volume rather than a bind mount: bind mounts hit uid-remapping
+      # problems under rootless podman.
+      - illuminati-data:/var/lib/mysql
+      # Files in this directory run automatically on first startup, in
+      # lexical order -- hence the numeric prefixes.
+      #
+      # The trailing ',z' relabels the files for SELinux. Without it, a
+      # rootless container on Fedora/RHEL is denied read access and the
+      # entrypoint aborts with "Permission denied". Docker on non-SELinux
+      # hosts accepts the flag and ignores it.
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,z
+      - ./sql/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro,z
+      - ./sql/views.sql:/docker-entrypoint-initdb.d/03-views.sql:ro,z
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-pmysql"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  illuminati-data:
